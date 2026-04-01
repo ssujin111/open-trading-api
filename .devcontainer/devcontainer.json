@@ -1,0 +1,8 @@
+{
+  "name": "open-trading-api",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "postCreateCommand": "chmod +x .devcontainer/setup-secrets.sh && .devcontainer/setup-secrets.sh && cd samsung_auto_trader && pip install -r requirements.txt"
+}
