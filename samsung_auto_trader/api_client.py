@@ -1,40 +1,68 @@
+import time
+from typing import Any, Dict, Optional
+
 import requests
-import json
-from typing import Dict, Any
+
 from logger import logger
 
+
 class APIClient:
+    MAX_RETRIES = 2
+    TIMEOUT_SECONDS = 10
+
     def __init__(self, base_url: str, appkey: str, appsecret: str):
         self.base_url = base_url
-        self.appkey = appkey
-        self.appsecret = appsecret
         self.session = requests.Session()
         self.session.headers.update({
             'content-type': 'application/json',
-            'appkey': self.appkey,
-            'appsecret': self.appsecret,
+            'appkey': appkey,
+            'appsecret': appsecret,
         })
 
-    def post(self, endpoint: str, data: Dict[str, Any], headers: Dict[str, str] = None) -> Dict[str, Any]:
+    def _request(
+        self,
+        method: str,
+        endpoint: str,
+        params: Optional[Dict[str, Any]] = None,
+        json_data: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
         url = f"{self.base_url}{endpoint}"
+        request_headers = self.session.headers.copy()
         if headers:
-            self.session.headers.update(headers)
-        try:
-            response = self.session.post(url, data=json.dumps(data))
-            response.raise_for_status()
-            return response.json()
-        except requests.RequestException as e:
-            logger.error(f"API request failed: {e}")
-            raise
+            request_headers.update(headers)
 
-    def get(self, endpoint: str, params: Dict[str, Any] = None, headers: Dict[str, str] = None) -> Dict[str, Any]:
-        url = f"{self.base_url}{endpoint}"
-        if headers:
-            self.session.headers.update(headers)
-        try:
-            response = self.session.get(url, params=params, headers=headers)
-            response.raise_for_status()
-            return response.json()
-        except requests.RequestException as e:
-            logger.error(f"API request failed: {e}")
-            raise
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                logger.info(f"API request {method} {endpoint} attempt {attempt}")
+                if method == 'GET':
+                    response = self.session.get(
+                        url,
+                        params=params,
+                        headers=request_headers,
+                        timeout=self.TIMEOUT_SECONDS,
+                    )
+                else:
+                    response = self.session.post(
+                        url,
+                        json=json_data,
+                        headers=request_headers,
+                        timeout=self.TIMEOUT_SECONDS,
+                    )
+                response.raise_for_status()
+                return response.json()
+            except requests.RequestException as exc:
+                logger.error(f"API request failed ({method} {endpoint}): {exc}")
+                if attempt == self.MAX_RETRIES:
+                    raise
+                backoff = 2 ** (attempt - 1)
+                logger.info(f"Retrying in {backoff} seconds")
+                time.sleep(backoff)
+
+        raise RuntimeError('Reached API retry limit')
+
+    def post(self, endpoint: str, data: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        return self._request('POST', endpoint, json_data=data, headers=headers)
+
+    def get(self, endpoint: str, params: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        return self._request('GET', endpoint, params=params, headers=headers)
